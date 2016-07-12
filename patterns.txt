@@ -1,4 +1,4 @@
-" ; " # §1-Punctuation, blank tags
+" ; "
 " , "
 " \. "
 ":;"
@@ -8,11 +8,11 @@
 "\-\-"
 "_-"
 " - "
-"w{4}\." # §2-Contact fields
+"w{4}\."
 "http"
 "@@"
 " (F|f)ax "
-"(S|s)tr " # §3-Abbreviations
+"(S|s)tr "
 " (U|u)niv "
 " Acad "
 " (A|a)vda\."
@@ -21,7 +21,7 @@
 " (S|s)t\."
 " (frm|frmly) "
 "etc(;|,)"
-" (A|a)dmin " # §4-Job titles
+" (A|a)dmin "
 "; Chair "
 "Assoc "
 "Dir\.? Gen\.?"
@@ -32,13 +32,13 @@
 "(Sec-Gen|Sec\.-Gen!\.|Sec-Gen\.)"
 "Dir\."
 "Pro Vice-Chancellor"
-"audio-visual" # §5-Library holdings and publications
+"audio-visual"
 "(E|e)-(book|Book|journal|Journal)"
 "(D|d)ocs? "
 "( videos | tapes )"
 "(A|a)nnual (R|r)eport"
 "(Y|y)earbook"
-"DELETE" # §6-Miscellaneous
+"DELETE"
 "[^Sec]\.-[^A-Za-z]"
 "[A-Za-z0-9]+Campus"
 "[0-9][A-Za-z]+ Campus\:"

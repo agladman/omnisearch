@@ -10,3 +10,16 @@
 make sure env, path etc. calls python3 not built in 2.7
 
 Aw yeah, this is gonna be awesome baby.
+
+## outline of omnisearch.sh script processes
+
+1. capture input filepath
+1. store search patterns to memory
+1. check that input filepath exists
+1. check whether input is a file or a directory and stores this in a variable
+1. create output file
+1. run pdfgrep searches and sends results to an output file
+1. in some case, adjusts for folio offset
+1. in some case, reformats output file
+1. print other useful information to output file: date, filename, start time, total runtime
+1. notify user on progress through script
