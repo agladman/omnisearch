@@ -92,7 +92,7 @@ elif [ -f "$1" ]
 		    # The user pressed Cancel
 		    exit 1 # exit with an error status
 		elif [ -z "$folio" ]; then
-		    # The user left the project name blank
+		    # The user left the folio blank
 		    osascript -e 'Tell application "System Events" to display alert "You must enter a folio; cancelling..." as warning'
 		    exit 1 # exit with an error status
 		fi
