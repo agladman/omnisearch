@@ -9,14 +9,15 @@ import datetime
 import logging
 # import notify
 import os
-# import re
+import re
 import sys
 import subprocess
 
+search_time = '{:%Y%m%d-%H%M}'.format(datetime.datetime.now())
+
 # logging.disable(logging.CRITICAL)  # comment out this line to enable logging
 logging.basicConfig(
-    filename='logs/omnisearch-{:%Y%m%d-%H%M}.txt'.format(
-        datetime.datetime.now()),
+    filename='logs/omnisearch-{0}.txt'.format(search_time),
     level=logging.DEBUG,
     format=' %(asctime)s - %(levelname)s - %(message)s')
 logging.info('start of program')
@@ -27,78 +28,135 @@ class SearchGroup(object):
         results for each pattern searched in PatternSearch subclass
         objects.
         """
+
     def __init__(self, filename, patterns):
         self.filename = filename
         self.patterns = patterns
-        self.output_path = '{0}/logs'.format(os.path.dirname(self.filename))
-        self.output_dir = os.makedirs(self.output_path, exist_ok=True)
+        self.output_path = ''
+        self.output_dir = ''
         self.output_file = ''
-        self.setOutputFile()
+        self.parse_output()
         self.results = []  # will hold dependent PatternSearch objects
         self.offset = 0
 
-    def setOutputFile(self):
-        self.output_file = '{}/{}-{:%Y%m%d-%H%M}.txt'.format(
+    def parse_output(self):
+        dirb = os.path.dirname(self.filename)
+        os.chdir(dirb)  # into base dir for output path
+        # logging.debug('- cwd changed from {0} to {1}'.format(dira, dirb))
+        self.output_path = 'logs'
+        try:
+            self.output_dir = os.makedirs(self.output_path, exist_ok=True)
+            if self.output_dir:
+                logging.debug('output_dir created')
+            else:
+                logging.debug('output_dir already exists')
+        except Exception as e:
+            logging.critical('exception creating output_dir: {0}'.format(e))
+        self.output_file = '{0}/{1}-{2}.txt'.format(
             self.output_path,
             os.path.basename(self.filename).rstrip('.pdf'),
-            datetime.datetime.now())
-        logging.debug('output destination set to {0}'.format(self.output_file))
+            search_time)
+        os.chdir(dira)  # back to script home directory
+        logging.info('output destination set to {0}'.format(self.output_file))
 
-    def fetchOffset(self):
+    def fetch_offset(self):
         try:
-            self.offset = int(subprocess.check_output('./getFolio.sh', shell=True))
+            self.offset = int(subprocess.check_output(
+                './getFolio.sh', shell=True))
         except Exception as e:
-            print('Error fetching the folio: {0}'.format(str(e)))
-            logging.critical('exception fetching folio: {0}'.format(str(e)))
+            logging.warning(
+                'error: {0}\nscript will continue without calculating offset'.format(e))
+            logging.error('continuing with default offset')
+        finally:
+            pass
 
-        self.offset -= 1
-        logging.debug('offset is {0}'.format(self.offset))
+        if self.offset > 0:
+            self.offset -= 1
+            logging.info('offset is {0}'.format(self.offset))
 
-    def runSearches(self):
+    def run_searches(self):
         for i, pattern in enumerate(self.patterns):
-            i = PatternSearch(pattern, self.filename)
-            i.pdfgrepCall()
+            i = PatternSearch(pattern, self.filename, self.offset)
+            i.call_pdfgrep()
             self.results.append(i)
 
 
 class PatternSearch(SearchGroup):
-    """Holds results of a search run against a given pattern on the
-        search file held in its parent SearchGroup object.
+    """Runs searches for a single pattern, stores and formats results.
         """
-    def __init__(self, pattern, filename):
+
+    def __init__(self, pattern, filename, offset):
         self.filename = filename
-        self.pattern = pattern
-        self.output_data = []  # will hold strings of formatted search results
-        
-    def pdfgrepCall(self):
+        self.pattern = pattern.strip('\n')
+        self.offset = offset
+        self.match_data = []  # results of searches with matches
+        self.nonmatch_data = []  # list of searches with zero results
+        self.output_data = []  # results with matches formatted for output
+
+    def call_pdfgrep(self):
         cmd = 'pdfgrep -n "{0}" {1}'.format(
-            self.pattern.strip('\n'), 
+            self.pattern,
             self.filename)
         logging.debug('command passed: {0}'.format(cmd))
-        proc = subprocess.Popen(cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            shell=True, 
-            universal_newlines=True)
-        text = proc.communicate()  # add [0]?
+        proc = subprocess.Popen(cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                shell=True,
+                                universal_newlines=True)
+        proc_output = proc.communicate()  # type is tuple
+        logging.debug('proc_output: {0}'.format(proc_output))
+        if not proc_output[0] and not proc_output[1]:  # i.e. both parts of tuple are ''
+            x = (self.pattern, 'no matches')
+            self.nonmatch_data.append(x)
+            logging.debug('tuple appended to nonmatch_data: {0}'.format(x))
+        else:
+            text = proc_output[0].split('\n') + proc_output[1].split('\n')
+            prevline = ''
+            for line in text:
+                if line:
+                    # logging.debug('line passed from text: {0}'.format(line))
+                    if line == prevline:
+                        pass
+                    else:
+                        x = (self.pattern, line)
+                        self.match_data.append(x)
+                        logging.debug(
+                            'tuple appended to match_data: {0}'.format(x))
+                    prevline = line
 
-        prevline = ''
-        for line in text:
-            logging.debug('line passed from text: {0}'.format(line))
-            if line == prevline:
-                pass
+    def format_output(self):
+        # items are tuples, pattern and line
+        for i, item in enumerate(self.match_data):
+            pattern, line = item
+            pnum_regex = re.compile(r'^(\d{1,4})\:(.*)$')
+            m = re.search(pnum_regex, line)
+            if m:
+                pnum = m.group(1)
+                rest = m.group(2)
+                # calc offset if needed
+                if self.offset > 0:
+                    x = int(pnum) + self.offset
+                    pnum = str(x)
+                # add leading zeros
+                while len(pnum) > 4:
+                    pnum = '0{0}'.format(pnum)
+                # swap order and add pattern
+                output_line = '{0}: {1}: {2}'.format(
+                    pnum, pattern.lstrip(), rest)
+                # append to ouput_data
+                self.output_data.append(output_line)
+                logging.debug('output line {0}: {1}'.format(i, output_line))
             else:
-                x = (self.pattern, line)
-                self.output_data.append(x)
-                logging.debug('tuple appended to output_data: {0}'.format(x))
-            prevline = line
-
+                logging.debug('output line {0} blank so skipped'.format(i))
+        self.output_data.sort()
 
 if __name__ == '__main__':
 
+    dira = os.getcwd()
+
     with open('patterns.txt') as f:
         patterns = f.readlines()
-    
+
     if len(sys.argv) > 1:
         filepath = ''.join(sys.argv[1:])
     else:
@@ -110,146 +168,78 @@ if __name__ == '__main__':
             else:
                 print('Check file or folder exists and try again.')
 
-    dir_files = []
+    search_queue = []
     cleanpath = os.path.abspath(filepath)
     if os.path.isfile(cleanpath):
-        dir_files.append(cleanpath)
+        dirb = os.path.dirname(cleanpath)
+        search_queue.append(cleanpath)
+        logging.debug('added {0} to search queue'.format(cleanpath))
     elif os.path.isdir(cleanpath):
+        dirb = cleanpath
+        os.chdir(dirb)  # into dir where items are stored
         dir_contents = os.listdir(cleanpath)
         for item in dir_contents:
-            if item.startswith('.'):
+            if item.startswith('.'):  # exclude .DS_Store etc. from searches
                 pass
-            else:
-                dir_files.append(item)
+            elif os.path.isdir(item):  # exclude logs or other subfolders
+                pass
+            elif os.path.isfile(item):
+                item = os.path.abspath(item)
+                search_queue.append(item)
+                logging.debug('added {0} to search queue'.format(item))
+            else:  # some other unforseen circumstance
+                pass
+        os.chdir(dira)  # back to script home directory
 
     SearchGroups = []
-    for i, file in enumerate(dir_files):
+    for i, file in enumerate(search_queue):
+        logging.debug('fetched {0} from search_queue at {1}'.format(file, i))
         i = SearchGroup(file, patterns)
-        if len(dir_files) == 1:
-            i.fetchOffset()
-        i.runSearches()
+        if len(search_queue) == 1:
+            i.fetch_offset()
+        i.run_searches()
         SearchGroups.append(i)
+        logging.debug('searches completed for {0}'.format(file))
 
+    print('ran {0} searches on {1} files'.format(
+        len(patterns), len(SearchGroups)))
     for obj in SearchGroups:
-        a = len(obj.results)
-        b = obj.filename
-        print('{0} results from {1}'.format(a, b))
+        nonmatched = []
+        body = []
+        print('searches on {0}: '.format(obj.filename))
+        for res in obj.results:
+            a = len(res.match_data)
+            b = len(res.nonmatch_data)
+            if b:
+                nonmatched.append(res.pattern)
+            else:
+                logging.debug('formatting output for {0}, pattern is: {1}.'.format(
+                    obj.filename, res.pattern))
+                print('\t{0}\t: {1} results'.format(res.pattern, a))
+                res.format_output()
+            for line in res.output_data:
+                body.append(line)
 
-    # logging.debug('searchtype set to {0}'.format(searchtype))
+        header = '{file}, {time}: {results} results from {searches} searches.\n\n'.format(
+            results=len(body),
+            searches=len(patterns),
+            file=os.path.basename(obj.filename),
+            time=search_time)
+        footer = '\nPatterns with zero results: \n'
+        for item in nonmatched:
+            footer += '\t{0}'.format(item)
 
-    # output_path = '{0}/logs'.format(os.path.dirname(cleanpath))
-    # output_dir = os.makedirs(output_path, exist_ok=True)
-    # if output_dir:
-    #     logging.debug('output_dir created: {0}'.format(output_dir))
-    # else:
-    #     logging.debug('output_dir already exists')
-
-    # if searchtype == 'liverun':
-    #     output_file = '{}/{}-{:%Y%m%d-%H%M}.txt'.format(
-    #         output_path,
-    #         os.path.basename(cleanpath).rstrip('.pdf'),
-    #         datetime.datetime.now())
-
-    #     try:
-    #         offset = int(subprocess.check_output('./getFolio.sh', shell=True))
-    #     except Exception as e:
-    #         print('Error fetching the folio: {0}'.format(str(e)))
-    #         logging.critical('exception fetching folio: {0}'.format(str(e)))
-
-    #     offset -= 1
-    #     logging.debug('offset is {0}'.format(offset))
-
-    # elif searchtype == 'proofrun':
-    #     output_file = '{}/proofrun-{:%Y%m%d-%H%M}.txt'.format(
-    #         output_path,
-    #         datetime.datetime.now())
-    # logging.debug('output destination set to {0}'.format(output_file))
-
-    # with open('patterns.txt') as f:
-    #     patterns = f.readlines()
-
-    # search_output = []  # list that will eventually hold results from pdfgrep
-
-
-    # def pdfgrepCall(patterns, searchfile):
-    #     fnoutput = []
-    #     for pattern in patterns:
-    #         cmd = 'pdfgrep -n "{0}" {1}'.format(pattern.strip('\n'), searchfile)
-    #         logging.debug('command passed: {0}'.format(cmd))
-    #         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, universal_newlines=False)
-    #         text = proc.communicate()
-
-    #         prevline = ''
-    #         for line in text:
-    #             logging.debug('line passed from text: {0}'.format(line))
-    #             if line == prevline:
-    #                 pass
-    #             else:
-    #                 x = (pattern, line)
-    #                 fnoutput.append(x)
-    #                 logging.debug('tuple appended to fnoutput: {0}'.format(x))
-    #             prevline = line
-
-    #     return fnoutput
-
-    # if searchtype == 'proofrun':
-    #     for i in os.listdir(cleanpath):
-    #         searchfile = i
-    #         for fnoutput_tuple in pdfgrepCall(patterns, searchfile):
-    #             pattern, line = fnoutput_tuple
-    #             newline = '{0}:\t{1}'.format(pattern, line)
-    #             search_output.append(newline)
-
-    # elif searchtype == 'liverun':
-    #     searchfile = cleanpath
-    #     for fnoutput_tuple in pdfgrepCall(patterns, searchfile):
-    #         pattern, line = fnoutput_tuple
-    #         newline = '{0}:\t{1}'.format(pattern, line)
-    #         # logging.debug('tuple unpacked to newline: {0}'.format(newline))
-    #         search_output.append(newline)
-
-        # TODO: in some case, adjust results for folio offset
-
-        # pnum_regex = re.compile(r'^(\d{1,4})\:(.*)$')
-
-        # for line in search_output:
-        #     n1 = re.match(pnum_regex, line)
-        #     n2 = n + offset
-        #     re.sub(n1, n2)
-
-        # TODO: in some case, reformat results
-
-        # pattern = ''
-        # pattern_regex = re.compile(r'^§\d{,2}/\d{,2}\:(.*)$')
-
-        # output_data = []
-
-        # for i in search_output:
-        #     p = re.match(pattern_regex, i)
-        #     n = re.match(pnum_regex, i)
-        #     if p:
-        #         pattern = p.group(1).strip()
-        #         logging.debug('pattern changed to: {}'.format(pattern))
-        #     elif n:
-        #         # append leading zeros
-        #         num = n.group(1)
-        #         while len(num) < 4:
-        #             num = '0{}'.format(num)
-
-        #         result = '{}:\t{}:\t{}'.format(num, pattern, n.group(2))
-        #         # logging.debug('result: {}'.format(result))
-
-        #         output_data.append(result)
-
-    # TODO: write results to output_file
-
-    # sort into page number order and write to the output file
-    # output_data = search_output  # just while debugging
-
-    # output_data.sort()
-    # with open(output_file, 'a') as f:
-    #     for item in output_data:
-    #         f.write(item)
+        os.chdir(dirb)
+        with open(obj.output_file, 'a') as f:
+            f.write(header)
+            for line in body:
+                f.write(line + '\n')
+            if len(nonmatched) > 0:
+                f.write(footer)
+            else:
+                f.write('\nAll searches found matches in the data.')
+            f.write('\n---END---')
+        os.chdir(dira)
 
     print('Script complete.')
     logging.info('end of program')
